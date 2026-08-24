@@ -1,7 +1,15 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # MAGIC %md
 # MAGIC # 🥉 Camada Bronze — Ingestão de Transações Financeiras (Fintech Anti-Fraud)
 # MAGIC **Responsabilidade:** Gerar e ingerir dados brutos de transações financeiras com Schema Enforcement estrito (`StructType`) e gravação em Delta Lake particionado por `payment_channel`.
+
+# COMMAND ----------
+
+# MAGIC %pip install faker
 
 # COMMAND ----------
 
@@ -136,9 +144,9 @@ def generate_fraud_transactions(num_records: int = 1000) -> list[dict]:
             "merchant_category": category,
             "transaction_city": city,
             "transaction_state": state,
-            "transaction_timestamp": tx_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "transaction_timestamp": tx_time,
             "device_id": device,
-            "ingestion_timestamp": now_str
+            "ingestion_timestamp": datetime.now()
         })
 
     return transactions
@@ -150,28 +158,18 @@ def generate_fraud_transactions(num_records: int = 1000) -> list[dict]:
 
 # COMMAND ----------
 
-bronze_output_path = "/tmp/fintech_lakehouse/bronze"
-landing_temp = "/tmp/fintech_lakehouse/_landing_temp"
-os.makedirs(landing_temp, exist_ok=True)
-
+# Gera os dados sintéticos na memória
 raw_records = generate_fraud_transactions(num_records=1000)
-temp_json = os.path.join(landing_temp, "raw_transactions.json")
 
-with open(temp_json, "w", encoding="utf-8") as f:
-    for record in raw_records:
-        f.write(json.dumps(record) + "\n")
+# Cria o DataFrame Spark com Schema Enforcement
+df_raw = spark.createDataFrame(raw_records, schema=BRONZE_SCHEMA)
 
-df_raw = spark.read.schema(BRONZE_SCHEMA).json(temp_json)
-
+# Grava como Tabela Delta Gerenciada no Databricks
 df_raw.write \
     .format("delta") \
     .mode("overwrite") \
     .partitionBy("payment_channel") \
-    .save(bronze_output_path)
+    .saveAsTable("bronze_transactions")
 
-if os.path.exists(temp_json):
-    os.remove(temp_json)
-
-total_bronze = spark.read.format("delta").load(bronze_output_path).count()
-print(f"✅ Camada Bronze gravada com sucesso no Databricks! Total: {total_bronze} registros.")
+print(f"✅ Camada Bronze gravada como tabela Delta no Databricks!")
 display(df_raw.limit(10))

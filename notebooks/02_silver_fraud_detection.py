@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # MAGIC %md
 # MAGIC # 🥈 Camada Silver — Governança LGPD & Motor de Detecção de Fraude
 # MAGIC **Responsabilidade:**
@@ -18,18 +22,12 @@ from pyspark.sql.functions import (
     when,
     current_timestamp
 )
+df_bronze = spark.table("bronze_transactions")
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ### 1. Leitura da Camada Bronze
-
-# COMMAND ----------
-
-bronze_path = "/tmp/fintech_lakehouse/bronze"
-silver_path = "/tmp/fintech_lakehouse/silver"
-
-df_bronze = spark.read.format("delta").load(bronze_path)
 
 # COMMAND ----------
 
@@ -113,7 +111,7 @@ df_silver_clean.write \
     .format("delta") \
     .mode("overwrite") \
     .partitionBy("fraud_decision") \
-    .save(silver_path)
+    .saveAsTable("silver_transactions")
 
 total_curated = df_silver_clean.count()
 print(f"✅ Camada Silver processada com sucesso no Databricks! Total: {total_curated} registros.")

@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # MAGIC %md
 # MAGIC # 🥇 Camada Gold — Modelagem Kimball Star Schema
 # MAGIC **Responsabilidade:**
@@ -24,10 +28,9 @@ from pyspark.sql.functions import (
 
 # COMMAND ----------
 
-silver_path = "/tmp/fintech_lakehouse/silver"
-gold_base_path = "/tmp/fintech_lakehouse/gold"
-
-df_silver = spark.read.format("delta").load(silver_path)
+# DBTITLE 1,Leitura da Silver via Unity Catalog
+# Leitura da camada Silver via tabela gerenciada do Unity Catalog
+df_silver = spark.table("silver_transactions")
 
 # COMMAND ----------
 
@@ -36,6 +39,7 @@ df_silver = spark.read.format("delta").load(silver_path)
 
 # COMMAND ----------
 
+# DBTITLE 1,Dimensões usando Unity Catalog
 # A. Dimensão Clientes
 df_dim_customers = df_silver.select(
     col("customer_id"),
@@ -43,7 +47,7 @@ df_dim_customers = df_silver.select(
     col("masked_cpf")
 ).dropDuplicates(["customer_id"])
 
-df_dim_customers.write.format("delta").mode("overwrite").save(f"{gold_base_path}/dim_customers")
+df_dim_customers.write.format("delta").mode("overwrite").saveAsTable("dim_customers")
 
 # B. Dimensão Estabelecimentos
 df_dim_merchants = df_silver.select(
@@ -51,14 +55,14 @@ df_dim_merchants = df_silver.select(
     col("merchant_category")
 ).dropDuplicates(["merchant_name"])
 
-df_dim_merchants.write.format("delta").mode("overwrite").save(f"{gold_base_path}/dim_merchants")
+df_dim_merchants.write.format("delta").mode("overwrite").saveAsTable("dim_merchants")
 
 # C. Dimensão Canais
 df_dim_channels = df_silver.select(
     col("payment_channel")
 ).dropDuplicates(["payment_channel"])
 
-df_dim_channels.write.format("delta").mode("overwrite").save(f"{gold_base_path}/dim_payment_channels")
+df_dim_channels.write.format("delta").mode("overwrite").saveAsTable("dim_payment_channels")
 
 # D. Dimensão Localidades e Macrorregiões
 df_dim_locations = df_silver.select(
@@ -73,7 +77,7 @@ df_dim_locations = df_silver.select(
     .otherwise(lit("Norte"))
 )
 
-df_dim_locations.write.format("delta").mode("overwrite").save(f"{gold_base_path}/dim_locations")
+df_dim_locations.write.format("delta").mode("overwrite").saveAsTable("dim_locations")
 
 # COMMAND ----------
 
@@ -82,6 +86,7 @@ df_dim_locations.write.format("delta").mode("overwrite").save(f"{gold_base_path}
 
 # COMMAND ----------
 
+# DBTITLE 1,Tabela Fato usando Unity Catalog
 df_fact = df_silver.select(
     col("transaction_id"),
     col("customer_id"),
@@ -105,7 +110,7 @@ df_fact.write \
     .format("delta") \
     .mode("overwrite") \
     .partitionBy("year_month") \
-    .save(f"{gold_base_path}/fact_financial_transactions")
+    .saveAsTable("fact_financial_transactions")
 
 print(f"✅ Camada Gold Star Schema gerada no Databricks com sucesso!")
 display(df_fact.limit(10))
