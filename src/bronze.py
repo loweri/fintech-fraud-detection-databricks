@@ -200,7 +200,9 @@ def ingest_bronze(spark: SparkSession, output_path: str, num_records: int = 1000
     if os.path.exists(temp_json):
         os.remove(temp_json)
 
-    total_ingested = df_raw.count()
+    # Contagem segura diretamente da tabela Delta persistida
+    total_ingested = spark.read.format("delta").load(output_path).count()
+
     print("=" * 60)
     print(f"  ✅ Camada Bronze gravada com sucesso!")
     print(f"  📁 Destino: {output_path}")
