@@ -264,4 +264,4 @@ pytest tests/ -v
 
 **Ericles Fernandes Oliveira**  
 *Data Engineer | Analytics Engineering & Cloud Data Architectures*  
-🔗 [LinkedIn](https://www.linkedin.com/in/ericles-oliveira) • 🐙 [GitHub](https://github.com/loweri)
+🔗 [LinkedIn](https://www.linkedin.com/in/ericlesoliveira/) • 🐙 [GitHub](https://github.com/loweri) • 📧 [E-mail](mailto:ericlesg@proton.me)
