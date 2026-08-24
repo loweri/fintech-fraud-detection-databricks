@@ -9,7 +9,7 @@ Padrão AAA (Arrange, Act, Assert) para validação de:
 
 import pytest
 import os
-from datetime import datetime
+import json
 from pyspark.sql import SparkSession
 from delta import configure_spark_with_delta_pip
 from src.bronze import BRONZE_SCHEMA
@@ -30,8 +30,25 @@ def spark():
         .config("spark.sql.shuffle.partitions", "2")
 
     spark_sess = configure_spark_with_delta_pip(builder).getOrCreate()
+    spark_sess.sparkContext.setLogLevel("ERROR")
     yield spark_sess
     spark_sess.stop()
+
+
+def _create_bronze_delta(spark, tmp_path, folder_name: str, rows: list[dict]) -> str:
+    """
+    Grava dados de teste diretamente em arquivo JSON em disco usando I/O nativo do Python,
+    e faz a leitura direta via JVM do Spark para evitar serialização via cloudpickle.
+    """
+    json_file = os.path.join(str(tmp_path), f"{folder_name}.json")
+    with open(json_file, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(r, default=str) + "\n")
+
+    target_path = os.path.join(str(tmp_path), folder_name)
+    df = spark.read.schema(BRONZE_SCHEMA).json(json_file)
+    df.write.format("delta").mode("overwrite").partitionBy("payment_channel").save(target_path)
+    return target_path
 
 
 def test_silver_lgpd_data_masking(spark, tmp_path):
@@ -42,9 +59,7 @@ def test_silver_lgpd_data_masking(spark, tmp_path):
       - Colunas originais sensíveis são removidas do DataFrame.
     """
     # 1. ARRANGE (Preparação dos dados)
-    bronze_path = os.path.join(str(tmp_path), "bronze")
-    silver_path = os.path.join(str(tmp_path), "silver")
-
+    silver_path = os.path.join(str(tmp_path), "silver_lgpd")
     raw_data = [{
         "transaction_id": "TX-TEST-001",
         "customer_id": "CUST-0001",
@@ -57,13 +72,12 @@ def test_silver_lgpd_data_masking(spark, tmp_path):
         "merchant_category": "Supermercados & Alimentação",
         "transaction_city": "São Paulo",
         "transaction_state": "SP",
-        "transaction_timestamp": datetime(2026, 8, 10, 14, 30, 0),
+        "transaction_timestamp": "2026-08-10 14:30:00",
         "device_id": "DEV-NORMAL-01",
-        "ingestion_timestamp": datetime.now()
+        "ingestion_timestamp": "2026-08-10 14:31:00"
     }]
 
-    df_bronze = spark.createDataFrame(raw_data, schema=BRONZE_SCHEMA)
-    df_bronze.write.format("delta").mode("overwrite").partitionBy("payment_channel").save(bronze_path)
+    bronze_path = _create_bronze_delta(spark, tmp_path, "bronze_lgpd", raw_data)
 
     # 2. ACT (Execução da transformação)
     total_processed = transform_silver(spark, bronze_path, silver_path)
@@ -86,9 +100,7 @@ def test_silver_fraud_blocking_logic(spark, tmp_path):
       - Esperado: risk_score >= 65 e fraud_decision == 'BLOQUEADA_SUSPEITA_FRAUDE'
     """
     # 1. ARRANGE
-    bronze_path = os.path.join(str(tmp_path), "bronze_fraud")
     silver_path = os.path.join(str(tmp_path), "silver_fraud")
-
     fraud_data = [{
         "transaction_id": "TX-FRAUD-999",
         "customer_id": "CUST-0099",
@@ -101,13 +113,12 @@ def test_silver_fraud_blocking_logic(spark, tmp_path):
         "merchant_category": "Criptoativos & Investimentos P2P",
         "transaction_city": "Manaus",
         "transaction_state": "AM",
-        "transaction_timestamp": datetime(2026, 8, 15, 2, 15, 0),  # Madrugada
+        "transaction_timestamp": "2026-08-15 02:15:00",  # Madrugada
         "device_id": "DEV-SUSPECT-XYZ123",  # Dispositivo suspeito
-        "ingestion_timestamp": datetime.now()
+        "ingestion_timestamp": "2026-08-15 02:16:00"
     }]
 
-    df_bronze = spark.createDataFrame(fraud_data, schema=BRONZE_SCHEMA)
-    df_bronze.write.format("delta").mode("overwrite").partitionBy("payment_channel").save(bronze_path)
+    bronze_path = _create_bronze_delta(spark, tmp_path, "bronze_fraud", fraud_data)
 
     # 2. ACT
     transform_silver(spark, bronze_path, silver_path)
@@ -130,9 +141,7 @@ def test_silver_legitimate_transaction_approval(spark, tmp_path):
       - Esperado: risk_score < 35 e fraud_decision == 'APROVADA'
     """
     # 1. ARRANGE
-    bronze_path = os.path.join(str(tmp_path), "bronze_legit")
     silver_path = os.path.join(str(tmp_path), "silver_legit")
-
     legit_data = [{
         "transaction_id": "TX-LEGIT-100",
         "customer_id": "CUST-0050",
@@ -145,13 +154,12 @@ def test_silver_legitimate_transaction_approval(spark, tmp_path):
         "merchant_category": "Farmácias & Saúde",
         "transaction_city": "São Paulo",
         "transaction_state": "SP",
-        "transaction_timestamp": datetime(2026, 8, 18, 15, 0, 0),
+        "transaction_timestamp": "2026-08-18 15:00:00",
         "device_id": "DEV-PRIMARY-55",
-        "ingestion_timestamp": datetime.now()
+        "ingestion_timestamp": "2026-08-18 15:01:00"
     }]
 
-    df_bronze = spark.createDataFrame(legit_data, schema=BRONZE_SCHEMA)
-    df_bronze.write.format("delta").mode("overwrite").partitionBy("payment_channel").save(bronze_path)
+    bronze_path = _create_bronze_delta(spark, tmp_path, "bronze_legit", legit_data)
 
     # 2. ACT
     transform_silver(spark, bronze_path, silver_path)
