@@ -6,6 +6,8 @@ multicanais (PIX, Cartão, TED, Boleto) com Schema Enforcement estrito
 (StructType) e particionamento em Delta Lake por payment_channel.
 """
 
+import os
+import json
 import random
 from datetime import datetime, timedelta
 from faker import Faker
@@ -91,7 +93,7 @@ def generate_fraud_transactions(num_records: int = 1000) -> list[dict]:
 
     transactions = []
     base_time = datetime(2026, 8, 1, 0, 0, 0)
-    now = datetime.now()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     for i in range(1, num_records + 1):
         cust = random.choice(customers)
@@ -148,9 +150,9 @@ def generate_fraud_transactions(num_records: int = 1000) -> list[dict]:
             "merchant_category": category,
             "transaction_city": city,
             "transaction_state": state,
-            "transaction_timestamp": tx_time,
+            "transaction_timestamp": tx_time.strftime("%Y-%m-%d %H:%M:%S"),
             "device_id": device,
-            "ingestion_timestamp": now
+            "ingestion_timestamp": now_str
         })
 
     return transactions
@@ -163,6 +165,7 @@ def ingest_bronze(spark: SparkSession, output_path: str, num_records: int = 1000
     """
     Ingere transações financeiras na Camada Bronze com Delta Lake,
     aplicando Schema Enforcement estrito e particionamento por payment_channel.
+    Utiliza I/O nativo JSON da JVM para máxima velocidade e estabilidade.
     """
     print("=" * 60)
     print("  💳 INGESTÃO BRONZE — Fintech Fraud Detection Lakehouse")
@@ -170,7 +173,18 @@ def ingest_bronze(spark: SparkSession, output_path: str, num_records: int = 1000
     print("=" * 60)
 
     raw_data = generate_fraud_transactions(num_records)
-    df_raw = spark.createDataFrame(raw_data, schema=BRONZE_SCHEMA)
+
+    # Grava arquivo JSON temporário para leitura direta via JVM
+    landing_dir = os.path.join(os.path.dirname(output_path), "_landing_temp")
+    os.makedirs(landing_dir, exist_ok=True)
+    temp_json = os.path.join(landing_dir, "raw_transactions.json")
+
+    with open(temp_json, "w", encoding="utf-8") as f:
+        for record in raw_data:
+            f.write(json.dumps(record) + "\n")
+
+    # Leitura nativa com Schema Enforcement estrito
+    df_raw = spark.read.schema(BRONZE_SCHEMA).json(temp_json)
 
     print(f"  🛡️ Schema Enforcement validado ({len(BRONZE_SCHEMA.fields)} colunas).")
     print(f"  💾 Gravando em Delta Lake particionado por 'payment_channel'...")
@@ -181,6 +195,10 @@ def ingest_bronze(spark: SparkSession, output_path: str, num_records: int = 1000
         .mode("overwrite") \
         .partitionBy("payment_channel") \
         .save(output_path)
+
+    # Limpeza do arquivo temporário
+    if os.path.exists(temp_json):
+        os.remove(temp_json)
 
     total_ingested = df_raw.count()
     print("=" * 60)
